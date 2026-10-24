@@ -1,7 +1,7 @@
 import { ACTIVITIES, PLACES, FARMS } from "./data.js";
 import { parseQuery } from "./parser.js";
 import { rank, rankPlaces, describeDates, fmtMinutes } from "./engine.js";
-import { importLibrary, geocodePlace, searchFarms, MAP_ID } from "./google.js";
+import { importLibrary, geocodePlace, suggestPlaces, resolveSuggestion, searchFarms, MAP_ID } from "./google.js";
 
 const $ = (s) => document.querySelector(s);
 const STORE = "farmday.profile.v1";
@@ -34,9 +34,14 @@ const OSM_THRESHOLD = 6; // search Google for more farms when curated results ar
 /* ---------------- state ---------------- */
 function load() {
   const fromUrl = readUrl();
-  if (fromUrl) return fromUrl;
-  try { const s = JSON.parse(localStorage.getItem(STORE)); if (s && s.origin) return { ...structuredClone(DEFAULT), ...s }; } catch {}
+  if (fromUrl && validOrigin(fromUrl)) return fromUrl;
+  try { const s = JSON.parse(localStorage.getItem(STORE)); if (s && validOrigin(s)) return { ...structuredClone(DEFAULT), ...s }; } catch {}
   return structuredClone(DEFAULT);
+}
+function validOrigin(s) {
+  const [lat, lng] = s.origin || [];
+  return typeof s.originName === "string" && s.originName.trim() !== "" &&
+    Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180;
 }
 function save() {
   try { localStorage.setItem(STORE, JSON.stringify(state)); } catch {}
@@ -55,8 +60,9 @@ function readUrl() {
   const p = new URLSearchParams(location.search);
   if (p.has("q")) {
     const s = structuredClone(DEFAULT); s.wants = []; s.party = {};
-    const unknownPlace = applyParsed(s, parseQuery(p.get("q"))); s.q = p.get("q");
-    if (unknownPlace) pendingPlace = unknownPlace; // geocoded at boot
+    const parsed = parseQuery(p.get("q"));
+    const unknownPlace = applyParsed(s, parsed); s.q = p.get("q");
+    pendingPlace = placeToLookUp(parsed, unknownPlace); // geocoded at boot
     return s;
   }
   if (!p.has("ll")) return null;
@@ -80,33 +86,101 @@ function applyParsed(s, parsed) {
   return parsed.originText;
 }
 
+// What to send to Google: "near X" text, or leftover words like "phoenix" when no place was recognized
+function placeToLookUp(parsed, unknownPlace) {
+  if (unknownPlace) return { text: unknownPlace, strict: false };
+  if (!parsed.origin && parsed.rest && parsed.rest.length >= 3) return { text: parsed.rest, strict: true };
+  return null;
+}
+
 async function onAsk(text) {
   state.q = text;
   const parsed = parseQuery(text);
   // A fresh question resets activities & companions to what was said
   state.wants = []; state.nice = []; state.party = {}; state.prefs = {};
   const unknownPlace = applyParsed(state, parsed);
-  if (unknownPlace) await geocode(unknownPlace);
+  const look = placeToLookUp(parsed, unknownPlace);
+  if (look) await geocode(look.text, look);
   syncControls(); update();
   document.querySelector(".intent").scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
 }
 
-async function geocode(text) {
+async function geocode(text, { strict = false } = {}) {
   const status = $("#fromStatus");
-  const key = text.toLowerCase().trim();
-  if (PLACES[key]) { state.originName = title(key); state.origin = PLACES[key]; status.textContent = ""; status.className = "status"; return true; }
+  text = (text || "").trim();
+  if (!text) { $("#from").value = state.originName; return false; } // empty field: keep the current place
+  const key = text.toLowerCase();
+  if (PLACES[key]) { setOrigin([...PLACES[key]], title(key), ""); return true; }
   status.textContent = "Looking up…"; status.className = "status";
-  try {
-    const hit = await geocodePlace(text);
-    if (!hit) throw new Error("not found");
-    state.origin = [hit.lat, hit.lng];
-    state.originName = text.replace(/\b\w/g, (c) => c.toUpperCase());
-    status.textContent = hit.label;
-    return true;
-  } catch {
-    status.textContent = `Couldn't find "${text}" — try a neighborhood or ZIP.`; status.className = "status err";
-    return false;
-  }
+  const hit = await geocodePlace(text, { strict }).catch(() => null);
+  if (hit) { setOrigin([hit.lat, hit.lng], hit.name, hit.label); return true; }
+  status.textContent = strict
+    ? `Didn't catch a place in that — still searching from ${state.originName}. Type a town or ZIP in "Starting from".`
+    : `Couldn't find "${text}" — try a town, neighborhood or ZIP.`;
+  status.className = "status err";
+  return false;
+}
+function setOrigin(ll, name, label) {
+  state.origin = ll; state.originName = name;
+  const status = $("#fromStatus");
+  status.textContent = label || ""; status.className = "status";
+}
+
+/* ---------------- "Starting from" with Google place suggestions ---------------- */
+function buildPlaceSuggest() {
+  const input = $("#from"), list = $("#fromList");
+  let items = [], active = -1, timer, reqId = 0, picking = false;
+
+  const close = () => { list.hidden = true; input.setAttribute("aria-expanded", "false"); active = -1; };
+  const render = () => {
+    list.replaceChildren(...items.map((it, i) => {
+      const li = el("li", { role: "option", id: `from-opt-${i}`, "aria-selected": String(i === active) },
+        el("b", {}, it.main), it.secondary ? el("span", {}, it.secondary) : null);
+      li.addEventListener("mousedown", (e) => { e.preventDefault(); pick(i); }); // before input blur
+      return li;
+    }));
+    list.hidden = !items.length;
+    input.setAttribute("aria-expanded", String(!!items.length));
+    if (active >= 0) input.setAttribute("aria-activedescendant", `from-opt-${active}`); else input.removeAttribute("aria-activedescendant");
+  };
+  const pick = async (i) => {
+    const it = items[i]; if (!it) return;
+    picking = true; close(); input.value = it.main;
+    try {
+      const hit = await resolveSuggestion(it);
+      setOrigin([hit.lat, hit.lng], hit.name, hit.label);
+      syncControls(); update();
+    } catch { await geocode(it.main) && (syncControls(), update()); }
+    picking = false;
+  };
+
+  input.addEventListener("input", () => {
+    clearTimeout(timer);
+    const q = input.value.trim();
+    if (q.length < 2) { items = []; close(); return; }
+    timer = setTimeout(async () => {
+      const id = ++reqId;
+      try { const res = await suggestPlaces(q); if (id !== reqId) return; items = res; active = -1; render(); }
+      catch { items = []; close(); }
+    }, 220);
+  });
+  input.addEventListener("keydown", (e) => {
+    if (list.hidden && e.key !== "Enter") return;
+    if (e.key === "ArrowDown") { e.preventDefault(); active = Math.min(items.length - 1, active + 1); render(); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); active = Math.max(0, active - 1); render(); }
+    else if (e.key === "Escape") close();
+    else if (e.key === "Enter") {
+      e.preventDefault();
+      if (!list.hidden && items.length) pick(active >= 0 ? active : 0);
+      else input.blur(); // falls through to the change handler
+    }
+  });
+  input.addEventListener("blur", () => setTimeout(close, 120));
+  // Typed something without picking a suggestion: geocode it
+  input.addEventListener("change", async () => {
+    if (picking) return;
+    if (await geocode(input.value)) { syncControls(); update(); }
+  });
 }
 
 /* ---------------- controls ---------------- */
@@ -116,7 +190,7 @@ function buildControls() {
     b.onclick = () => { $("#q").value = t; onAsk(t); };
     return b;
   }));
-  $("#placelist").append(...Object.keys(PLACES).map((k) => el("option", { value: title(k) })));
+  buildPlaceSuggest();
 
   $("#activityChips").append(...CHOICES.map((key) => {
     const meta = key === "fruit" ? { emoji: "🧺", label: "Any fruit picking" } : ACTIVITIES[key];
@@ -145,13 +219,12 @@ function buildControls() {
 
   $("#miles").oninput = (e) => { state.maxMiles = +e.target.value; syncControls(); update(); };
   $("#when").onchange = (e) => { state.when = e.target.value; update(); };
-  $("#from").onchange = async (e) => { if (await geocode(e.target.value)) { syncControls(); update(); } };
   $("#locate").onclick = () => {
     const status = $("#fromStatus");
     if (!navigator.geolocation) { status.textContent = "Location isn't available in this browser."; return; }
     status.textContent = "Finding you…";
     navigator.geolocation.getCurrentPosition(
-      (pos) => { state.origin = [pos.coords.latitude, pos.coords.longitude]; state.originName = "My location"; status.textContent = ""; syncControls(); update(); },
+      (pos) => { setOrigin([pos.coords.latitude, pos.coords.longitude], "My location", ""); syncControls(); update(); },
       () => { status.textContent = "Couldn't get your location."; status.className = "status err"; },
       { timeout: 8000 },
     );
@@ -394,7 +467,7 @@ function drawMap(matches) {
     const mk = new gm.AdvancedMarkerElement({
       map, position: { lat: f.lat, lng: f.lng }, title: `${n}. ${f.name}`, content: pinEl(cls, f.id, n), gmpClickable: true, zIndex: 100 - n,
     });
-    mk.addListener("gmp-click", () => { openInfo(mk, html); focus(f.id, false); });
+    mk.addEventListener("gmp-click", () => { openInfo(mk, html); focus(f.id, false); });
     mk._html = html;
     overlays.push(mk); markers[f.id] = mk;
   };
@@ -454,7 +527,7 @@ buildControls();
 initMap();
 syncControls();
 if (pendingPlace) {
-  geocode(pendingPlace).then(() => { pendingPlace = null; syncControls(); update(); });
+  geocode(pendingPlace.text, pendingPlace).then(() => { pendingPlace = null; syncControls(); update(); });
 } else {
   update();
 }

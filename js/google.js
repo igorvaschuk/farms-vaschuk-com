@@ -26,14 +26,55 @@ const KEY = "AIzaSyB8Rom73R3Rd-0f2yy7I6VqNB5LydF1Aso";
 
 export const importLibrary = (name) => google.maps.importLibrary(name);
 
-/* ---------------- geocoding ---------------- */
-export async function geocodePlace(text) {
+/* ---------------- geocoding & place suggestions ---------------- */
+// Result types precise enough to be a starting point (not a whole country)
+const PLACE_TYPES = new Set([
+  "locality", "sublocality", "sublocality_level_1", "neighborhood", "postal_code", "colloquial_area",
+  "administrative_area_level_1", "administrative_area_level_2", "administrative_area_level_3",
+  "street_address", "premise", "route", "airport", "point_of_interest", "establishment", "park",
+]);
+
+/** Free text → { lat, lng, name, label } or null. Rejects empty and country-level matches. */
+export async function geocodePlace(text, { strict = false } = {}) {
+  text = (text || "").trim();
+  if (text.length < 2) return null;
   const { Geocoder } = await importLibrary("geocoding");
-  const { results } = await new Geocoder().geocode({ address: text, componentRestrictions: { country: "US" } });
-  const hit = results?.[0];
+  let results;
+  try {
+    ({ results } = await new Geocoder().geocode({ address: text, componentRestrictions: { country: "US" } }));
+  } catch { return null; } // ZERO_RESULTS rejects
+  const hit = results?.find((r) => r.types.some((t) => PLACE_TYPES.has(t)));
   if (!hit) return null;
+  // "strict" (guessing a place from leftover words) only accepts towns, neighborhoods, ZIPs, counties, states
+  if (strict && !hit.types.some((t) => /locality|neighborhood|postal_code|administrative_area|colloquial/.test(t))) return null;
+  if (hit.partial_match && strict) return null;
   const loc = hit.geometry.location;
-  return { lat: loc.lat(), lng: loc.lng(), label: hit.formatted_address };
+  const comp = (type) => hit.address_components.find((c) => c.types.includes(type));
+  const name = (comp("neighborhood") || comp("sublocality") || comp("locality") || comp("postal_code") || comp("administrative_area_level_2") || comp("administrative_area_level_1"))?.long_name;
+  return { lat: loc.lat(), lng: loc.lng(), name: name || text, label: hit.formatted_address };
+}
+
+let sessionToken = null;
+/** Google place suggestions for a partially typed starting point. */
+export async function suggestPlaces(input) {
+  const { AutocompleteSuggestion, AutocompleteSessionToken } = await importLibrary("places");
+  sessionToken ??= new AutocompleteSessionToken(); // groups keystrokes + final pick into one billed session
+  const { suggestions } = await AutocompleteSuggestion.fetchAutocompleteSuggestions({
+    input, sessionToken, includedRegionCodes: ["us"], includedPrimaryTypes: ["(regions)"],
+  });
+  return (suggestions || []).filter((s) => s.placePrediction).slice(0, 6).map((s) => ({
+    main: s.placePrediction.mainText?.text || s.placePrediction.text.text,
+    secondary: s.placePrediction.secondaryText?.text || "",
+    prediction: s.placePrediction,
+  }));
+}
+
+/** Resolve a picked suggestion to coordinates (ends the autocomplete session). */
+export async function resolveSuggestion(sug) {
+  const place = sug.prediction.toPlace();
+  await place.fetchFields({ fields: ["location", "formattedAddress", "displayName"] });
+  sessionToken = null;
+  return { lat: place.location.lat(), lng: place.location.lng(), name: sug.main, label: place.formattedAddress };
 }
 
 /* ---------------- place search ---------------- */

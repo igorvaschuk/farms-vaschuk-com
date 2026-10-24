@@ -72,7 +72,32 @@ export function parseQuery(raw) {
   if (/\b(cheap|budget|free|inexpensive|affordable)\b/.test(text)) out.prefs.budget = true;
   if (/\b(train|transit|no car|without a car|lirr|metro[- ]north|nj transit|bus)\b/.test(text)) out.prefs.transit = true;
 
+  out.rest = leftovers(text);
   return out;
+}
+
+// Words that are about the trip, not the place — stripped before guessing a location
+const FILLER = new Set(`a an the and or of for to with without me my our us we i im i'm you your find show search searching
+searches looking look want wanna need get go going take visit where what which any some good great best nice fun place places
+spot spots day trip trips outing farm farms orchard orchards picking pick own u yourown pyo patch fruit fruits apple apples pear
+pears berry berries strawberry strawberries blueberry blueberries raspberry raspberries peach peaches pumpkin pumpkins flower
+flowers sunflower sunflowers corn maze hay hayride hayrides ride rides tractor wagon petting zoo animals animal goats playground
+play area slides cider donut donuts doughnut doughnuts bakery pie pies wine winery cidery brewery tasting room family families
+friendly kid kids child children son daughter toddler toddlers baby babies stroller little ones dog dogs pup puppy pet pets
+wheelchair accessible accessibility quiet uncrowded crowded crowds calm low key cheap budget free affordable inexpensive train
+transit car bus lirr metro north nj open opened today tonight tomorrow this weekend weekends saturday sunday sat sun next week
+less than under within up max around near nearby close closest in from by at resident residents live living based mi mile miles
+min mins minute minutes hour hours hr hrs h away drive driving distance about approx approximately`.split(/\s+/));
+
+function leftovers(text) {
+  const words = text
+    .replace(/\d+(\.\d+)?\s*(mi|miles?|min|mins|minutes?|h|hrs?|hours?)\b/g, " ")
+    .replace(/[^a-z0-9\s']/g, " ")
+    .split(/\s+/)
+    .filter((w) => w && !FILLER.has(w) && !/^\d+$/.test(w));
+  // A bare 5-digit ZIP is a great location hint
+  const zip = text.match(/\b\d{5}\b/);
+  return zip ? zip[0] : words.join(" ");
 }
 
 export function minutesToMiles(min) {

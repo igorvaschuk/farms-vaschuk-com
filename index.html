@@ -40,8 +40,11 @@
       <div class="ctl ctl-from">
         <label for="from">Starting from</label>
         <div class="row">
-          <input id="from" type="text" placeholder="Neighborhood or town" list="placelist">
-          <datalist id="placelist"></datalist>
+          <div class="suggest">
+            <input id="from" type="text" placeholder="Town, neighborhood or ZIP" autocomplete="off"
+              role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="fromList">
+            <ul id="fromList" class="suggest-list" role="listbox" hidden></ul>
+          </div>
           <button type="button" id="locate" class="icon-btn" title="Use my location" aria-label="Use my location">
             <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="7.5" fill="none"/></svg>
           </button>

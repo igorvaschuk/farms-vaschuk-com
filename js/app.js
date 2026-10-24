@@ -1,6 +1,7 @@
 import { ACTIVITIES, PLACES, FARMS } from "./data.js";
 import { parseQuery } from "./parser.js";
-import { rank, describeDates, fmtMinutes } from "./engine.js";
+import { rank, rankOsm, describeDates, fmtMinutes } from "./engine.js";
+import { fetchOsmFarms } from "./osm.js";
 
 const $ = (s) => document.querySelector(s);
 const STORE = "farmday.profile.v1";
@@ -26,6 +27,8 @@ const DEFAULT = {
 
 let state = load();
 let map, layer, markers = {};
+let osmTimer, osmToken = 0, lastOsm = [];
+const OSM_THRESHOLD = 6; // fetch live farms when curated results are thinner than this
 
 /* ---------------- state ---------------- */
 function load() {
@@ -183,17 +186,86 @@ function syncControls() {
 function update() {
   save();
   const { dates, matches, misses } = rank(state);
-  renderSummary(dates, matches);
-  renderList(matches, dates);
+  lastOsm = [];
+  const wantOsm = matches.length < OSM_THRESHOLD;
+  renderSummary(dates, matches, 0);
+  renderList(matches, dates, wantOsm);
   renderMisses(misses);
   renderMap(matches);
+  if (wantOsm) loadOsm(dates, matches); else { osmToken++; $("#osm").hidden = true; }
 }
 
-function renderSummary(dates, matches) {
+// Live farms from OpenStreetMap, debounced so slider drags don't spam the API
+function loadOsm(dates, matches) {
+  const token = ++osmToken;
+  const sec = $("#osm");
+  sec.hidden = false;
+  sec.replaceChildren(el("div", { class: "loading" }, `Looking up more farms near ${state.originName}…`));
+  clearTimeout(osmTimer);
+  osmTimer = setTimeout(async () => {
+    let found;
+    try { found = await fetchOsmFarms(state.origin, state.maxMiles / 1.25); }
+    catch {
+      if (token !== osmToken) return;
+      sec.replaceChildren(el("p", { class: "loading-err" }, "Couldn't reach OpenStreetMap for more farms right now. Try again in a minute."));
+      return;
+    }
+    if (token !== osmToken) return; // a newer search started meanwhile
+    const ranked = rankOsm(state, found, matches);
+    lastOsm = ranked;
+    renderSummary(dates, matches, ranked.length);
+    if (!matches.length) $("#results").replaceChildren();
+    renderOsm(ranked, matches.length);
+    renderMap(matches);
+  }, 500);
+}
+
+function renderOsm(list, offset) {
+  const sec = $("#osm");
+  if (!list.length) {
+    sec.replaceChildren(el("div", { class: "empty" },
+      el("h3", {}, `No farms found within ${state.maxMiles} mi of ${state.originName}`),
+      el("p", {}, "Try a longer drive or a nearby town.")));
+    return;
+  }
+  sec.replaceChildren(
+    el("div", { class: "osm-head" },
+      el("h3", {}, offset ? `More farms near ${state.originName}` : `Farms near ${state.originName}`),
+      el("p", {}, "Live from OpenStreetMap. We can't confirm seasons or activities for these yet, so check with the farm before you go.")),
+    el("ol", { class: "osm-list" }, ...list.map((m, i) => osmCard(m, offset + i + 1))));
+}
+
+function osmCard(m, n) {
+  const f = m.farm;
+  const where = [f.town, f.state].filter(Boolean).join(", ");
+  const gq = encodeURIComponent(`${f.name} ${where}`);
+  const li = el("li", { class: "osm-card", id: `farm-${f.id}` },
+    el("div", { class: "card-head" },
+      el("div", { class: "rank" }, String(n)),
+      el("div", {},
+        el("h3", {}, f.name),
+        el("div", { class: "where" }, `${f.kind}${where ? ` · ${where}` : ""} · ${fmtMinutes(m.minutes)} · ~${m.miles} mi`)),
+      el("div", { class: "score" }, el("b", {}, `${m.score}%`), el("span", {}, "match"))),
+    el("div", { class: "notes" },
+      m.why.length ? el("div", {}, el("h4", {}, "Why it might fit"), el("ul", { class: "why" }, ...m.why.map((t) => el("li", {}, t)))) : el("div"),
+      el("div", {}, el("h4", {}, "Heads up"), el("ul", { class: "heads" }, ...m.heads.map((t) => el("li", {}, t))))),
+    el("div", { class: "card-foot" },
+      el("span", { class: "hours" }, "Source: OpenStreetMap"),
+      f.website ? el("a", { href: f.website, target: "_blank", rel: "noopener nofollow" }, "Website") : null,
+      el("a", { href: `https://www.google.com/maps/dir/?api=1&origin=${state.origin.join(",")}&destination=${f.lat},${f.lng}`, target: "_blank", rel: "noopener" }, "Directions"),
+      el("a", { href: `https://www.google.com/search?q=${gq}+hours`, target: "_blank", rel: "noopener" }, "Check hours"),
+      Object.assign(el("button", { type: "button" }, "On map"), { onclick: () => focus(f.id, true) })));
+  li.addEventListener("mouseenter", () => highlight(f.id));
+  return li;
+}
+
+function renderSummary(dates, matches, osmCount = 0) {
   const who = [state.party.toddler ? "a toddler" : state.party.kids ? "kids" : null, state.party.dog ? "a dog" : null].filter(Boolean);
   const wants = state.wants.map((w) => (w === "fruit" ? "fruit picking" : ACTIVITIES[w].label.toLowerCase()));
   $("#summary").replaceChildren(
-    el("h2", {}, matches.length ? `${matches.length} farm${matches.length === 1 ? "" : "s"} fit your day` : "Nothing fits every box"),
+    el("h2", {}, matches.length
+      ? `${matches.length} farm${matches.length === 1 ? "" : "s"} fit your day${osmCount ? ` + ${osmCount} more nearby` : ""}`
+      : osmCount ? `${osmCount} farm${osmCount === 1 ? "" : "s"} near ${state.originName}` : "Searching nearby farms"),
     el("p", {}, [
       `Open ${describeDates(dates)}`,
       `within ~${state.maxMiles} mi of ${state.originName}`,
@@ -203,8 +275,9 @@ function renderSummary(dates, matches) {
   );
 }
 
-function renderList(matches, dates) {
+function renderList(matches, dates, osmComing = false) {
   const ol = $("#results");
+  if (!matches.length && osmComing) { ol.replaceChildren(); return; }
   if (!matches.length) {
     ol.replaceChildren(el("li", { class: "empty" },
       el("h3", {}, "No farm checks every box"),
@@ -298,17 +371,28 @@ function renderMap(matches) {
     mk.on("click", () => focus(f.id, false));
     mk.addTo(layer); markers[f.id] = mk;
   });
+  lastOsm.forEach((m, i) => {
+    const f = m.farm, n = matches.length + i + 1;
+    const where = [f.town, f.state].filter(Boolean).join(", ");
+    const mk = L.marker([f.lat, f.lng], {
+      icon: L.divIcon({ className: "", html: `<div class="pin osm" data-id="${f.id}"><span>${n}</span></div>`, iconSize: [30, 30], iconAnchor: [15, 30], popupAnchor: [0, -28] }),
+      title: f.name, riseOnHover: true,
+    }).bindPopup(`<b>${n}. ${escapeHtml(f.name)}</b><br>${escapeHtml(f.kind)}${where ? ` · ${escapeHtml(where)}` : ""} · ${fmtMinutes(m.minutes)}<br><small>From OpenStreetMap</small>`);
+    mk.on("click", () => focus(f.id, false));
+    mk.addTo(layer); markers[f.id] = mk;
+  });
   fitMap();
 }
+function escapeHtml(s) { return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]); }
 function fitMap() {
   if (!map) return;
-  const pts = [state.origin, ...lastMatches.map((m) => [m.farm.lat, m.farm.lng])];
+  const pts = [state.origin, ...lastMatches.map((m) => [m.farm.lat, m.farm.lng]), ...lastOsm.map((m) => [m.farm.lat, m.farm.lng])];
   if (pts.length > 1) map.fitBounds(pts, { padding: [40, 40], maxZoom: 11 });
   else map.setView(state.origin, 9);
 }
 function highlight(id) {
   document.querySelectorAll(".pin").forEach((p) => p.classList.toggle("active", p.dataset.id === id));
-  document.querySelectorAll(".card").forEach((c) => c.classList.toggle("active", c.id === `farm-${id}`));
+  document.querySelectorAll(".card, .osm-card").forEach((c) => c.classList.toggle("active", c.id === `farm-${id}`));
 }
 function focus(id, fromCard) {
   highlight(id);

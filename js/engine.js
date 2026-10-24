@@ -174,6 +174,43 @@ export function rank(profile, now = new Date()) {
   return { dates, matches, misses: misses.filter((m) => m.cost < 0.7).slice(0, 5) };
 }
 
+/**
+ * Rank live OpenStreetMap farms. We only know name/location/some tags, so
+ * activities are "likely" (from the name or tags), never confirmed.
+ */
+export function rankOsm(profile, osmFarms, curatedMatches = []) {
+  const curated = curatedMatches.map((m) => m.farm);
+  const out = [];
+  for (const f of osmFarms) {
+    const miles = Math.round(haversineMiles(profile.origin, [f.lat, f.lng]) * ROAD_FACTOR);
+    if (miles > profile.maxMiles) continue;
+    // Skip OSM entries that duplicate a curated farm
+    if (curated.some((c) => haversineMiles([c.lat, c.lng], [f.lat, f.lng]) < 0.6 || sameName(c.name, f.name))) continue;
+
+    const hints = new Set(f.hints);
+    const fruitHint = FRUIT.some((x) => hints.has(x)) || hints.has("pyo");
+    let score = 40 + 18 * (1 - miles / profile.maxMiles);
+    const why = [], heads = [];
+    for (const w of profile.wants) {
+      const hit = w === "fruit" ? fruitHint : hints.has(w);
+      if (hit) { score += 14; why.push(`Likely ${wantLabel(w)} (${f.kind.toLowerCase()})`); }
+      else { score -= 10; heads.push(`Can't confirm ${wantLabel(w)} here — check first`); }
+    }
+    if (hints.has("pyo")) { score += 6; why.push("Listed as pick-your-own"); }
+    if (f.kind === "Orchard") score += 4;
+    if (f.website) score += 3;
+    heads.push(f.hours ? `Listed hours: ${f.hours}` : "No hours listed — check before you go");
+
+    out.push({ farm: f, miles, minutes: driveMinutes(miles), score: Math.max(1, Math.min(90, Math.round(score))), why, heads, hints: [...hints] });
+  }
+  return out.sort((a, b) => b.score - a.score || a.miles - b.miles).slice(0, 20);
+}
+
+const sameName = (a, b) => {
+  const n = (s) => s.toLowerCase().replace(/\b(farms?|orchards?|the|&|and|family|country)\b/g, "").replace(/[^a-z]/g, "");
+  return n(a) && n(a) === n(b);
+};
+
 function daysUntil(endMMDD, from) {
   const end = new Date(from.getFullYear(), +endMMDD.slice(0, 2) - 1, +endMMDD.slice(3));
   return Math.round((end - from) / 86400000);

@@ -92,7 +92,10 @@
       <button role="tab" data-view="map" aria-selected="false">Map</button>
     </div>
     <div class="split" id="split" data-view="list">
-      <ol class="results" id="results"></ol>
+      <div class="list-col">
+        <ol class="results" id="results"></ol>
+        <section class="osm" id="osm" hidden aria-live="polite"></section>
+      </div>
       <div class="map-col"><div id="map" role="region" aria-label="Map of matching farms"></div></div>
     </div>
     <section class="misses" id="misses" hidden></section>

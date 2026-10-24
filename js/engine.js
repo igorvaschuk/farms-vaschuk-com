@@ -220,10 +220,17 @@ export function rankPlaces(profile, places, curatedMatches = [], now = new Date(
   out.sort((a, b) => b.score - a.score || a.miles - b.miles);
   const kept = [];
   for (const m of out) {
-    if (!kept.some((k) => haversineMiles([k.farm.lat, k.farm.lng], [m.farm.lat, m.farm.lng]) < 0.15)) kept.push(m);
+    const dupe = kept.some((k) => {
+      const d = haversineMiles([k.farm.lat, k.farm.lng], [m.farm.lat, m.farm.lng]);
+      return d < 0.15 || (d < 1 && namePrefix(k.farm.name) === namePrefix(m.farm.name));
+    });
+    if (!dupe) kept.push(m);
   }
   return kept.slice(0, 20);
 }
+
+// "Goold Hill Vineyard and Cidery" / "Goold Hill Apple Orchard" → "gooldhill"
+const namePrefix = (s) => s.toLowerCase().replace(/[^a-z ]/g, "").split(/\s+/).filter(Boolean).slice(0, 2).join("");
 
 const sameName = (a, b) => {
   const n = (s) => s.toLowerCase().replace(/\b(farms?|orchards?|the|&|and|family|country)\b/g, "").replace(/[^a-z]/g, "");

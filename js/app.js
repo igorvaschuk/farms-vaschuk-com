@@ -344,8 +344,8 @@ function renderMisses(misses) {
 /* ---------------- map ---------------- */
 async function initMap() {
   try {
-    const [{ Map, Circle, InfoWindow, LatLngBounds }, { AdvancedMarkerElement }] =
-      await Promise.all([importLibrary("maps"), importLibrary("marker")]);
+    const [{ Map, Circle, InfoWindow }, { AdvancedMarkerElement }, { LatLngBounds }] =
+      await Promise.all([importLibrary("maps"), importLibrary("marker"), importLibrary("core")]);
     gm = { Circle, LatLngBounds, AdvancedMarkerElement };
     map = new Map($("#map"), {
       mapId: MAP_ID, center: toLL(state.origin), zoom: 9,
@@ -353,11 +353,12 @@ async function initMap() {
       clickableIcons: false,
     });
     infoWindow = new InfoWindow();
-    renderMap(lastMatches); // draw whatever results arrived while the API loaded
   } catch (e) {
     console.error(e);
     $("#map").replaceChildren(el("p", { style: "padding:20px" }, "The map couldn't load — results still work."));
+    return;
   }
+  renderMap(lastMatches); // draw whatever results arrived while the API loaded
 }
 
 const toLL = ([lat, lng]) => ({ lat, lng });
@@ -370,6 +371,9 @@ let lastMatches = [];
 function renderMap(matches) {
   lastMatches = matches;
   if (!map) return;
+  try { drawMap(matches); } catch (e) { console.error("Map drawing failed:", e); }
+}
+function drawMap(matches) {
   overlays.forEach((o) => (o.setMap ? o.setMap(null) : (o.map = null)));
   overlays = []; markers = {};
   const leaf = getComputedStyle(document.documentElement).getPropertyValue("--leaf").trim() || "#2f6b3c";

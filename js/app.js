@@ -349,9 +349,14 @@ async function initMap() {
     gm = { Circle, LatLngBounds, AdvancedMarkerElement };
     map = new Map($("#map"), {
       mapId: MAP_ID, center: toLL(state.origin), zoom: 9,
-      gestureHandling: "cooperative", streetViewControl: false, mapTypeControl: false, fullscreenControl: true,
+      // No "use ctrl + scroll to zoom" overlay: the wheel scrolls the page until
+      // the person clicks into the map, then zooms it until the mouse leaves.
+      gestureHandling: "greedy", scrollwheel: false, zoomControl: true,
+      streetViewControl: false, mapTypeControl: false, fullscreenControl: true,
       clickableIcons: false,
     });
+    map.addListener("click", () => map.setOptions({ scrollwheel: true }));
+    $("#map").addEventListener("mouseleave", () => map.setOptions({ scrollwheel: false }));
     infoWindow = new InfoWindow();
   } catch (e) {
     console.error(e);

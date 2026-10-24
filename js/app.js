@@ -25,6 +25,7 @@ const DEFAULT = {
   wants: ["fruit"], nice: [], party: { kids: true }, prefs: {},
 };
 
+let pendingPlace = null;
 let state = load();
 let map, layer, markers = {};
 let osmTimer, osmToken = 0, lastOsm = [];
@@ -54,7 +55,9 @@ function readUrl() {
   const p = new URLSearchParams(location.search);
   if (p.has("q")) {
     const s = structuredClone(DEFAULT); s.wants = []; s.party = {};
-    applyParsed(s, parseQuery(p.get("q"))); s.q = p.get("q"); return s;
+    const unknownPlace = applyParsed(s, parseQuery(p.get("q"))); s.q = p.get("q");
+    if (unknownPlace) pendingPlace = unknownPlace; // geocoded at boot
+    return s;
   }
   if (!p.has("ll")) return null;
   const list = (k) => (p.get(k) || "").split(",").filter(Boolean);
@@ -418,5 +421,9 @@ function title(s) { return s.replace(/\b\w/g, (c) => c.toUpperCase()).replace(/\
 buildControls();
 initMap();
 syncControls();
-update();
+if (pendingPlace) {
+  geocode(pendingPlace).then(() => { pendingPlace = null; syncControls(); update(); });
+} else {
+  update();
+}
 console.info(`Farm Day: ${FARMS.length} farms loaded`);

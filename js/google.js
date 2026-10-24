@@ -125,15 +125,16 @@ function normalize(p, foundBy) {
     }
   }
   const addr = p.formattedAddress || "";
-  const parts = addr.split(",").map((s) => s.trim());
+  // "691 NY-146, Altamont, NY 12009, USA" → town "Altamont", state "NY"
+  const parts = addr.split(",").map((s) => s.trim()).filter((x) => !/^(usa|united states)$/i.test(x));
   return {
     id: `g-${p.id}`,
     source: "google",
     name: p.displayName || "Unnamed farm",
     lat: p.location.lat(), lng: p.location.lng(),
     kind: p.primaryTypeDisplayName || "Farm",
-    town: parts.length >= 3 ? parts[parts.length - 3] : "",
-    state: (parts[parts.length - 2] || "").split(" ")[0],
+    town: parts.length >= 2 ? parts[parts.length - 2] : "",
+    state: (parts[parts.length - 1] || "").split(" ")[0],
     address: addr,
     rating: p.rating ?? null,
     ratingCount: p.userRatingCount ?? 0,

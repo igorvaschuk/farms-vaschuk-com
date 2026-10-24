@@ -197,11 +197,12 @@ export function rankPlaces(profile, places, curatedMatches = [], now = new Date(
     } else {
       heads.push("No hours on Google — call before you go");
     }
+    const hoursBonus = f.openDays ? 6 : -6; // confirmed open on your dates beats unknown
     if (f.status === "CLOSED_TEMPORARILY") heads.unshift("Google lists it as temporarily closed");
 
     const hints = new Set(f.hints);
     const fruitHint = FRUIT.some((x) => hints.has(x)) || hints.has("pyo");
-    let score = 40 + 16 * (1 - miles / profile.maxMiles);
+    let score = 40 + 16 * (1 - miles / profile.maxMiles) + hoursBonus;
     for (const w of profile.wants) {
       const hit = w === "fruit" ? fruitHint : hints.has(w);
       if (hit) { score += 12; why.push(`Likely ${wantLabel(w)}`); }
@@ -215,7 +216,13 @@ export function rankPlaces(profile, places, curatedMatches = [], now = new Date(
 
     out.push({ farm: f, miles, minutes: driveMinutes(miles), score: Math.max(1, Math.min(92, Math.round(score))), why, heads, hints: [...hints] });
   }
-  return out.sort((a, b) => b.score - a.score || a.miles - b.miles).slice(0, 20);
+  // Several listings at one address (e.g. an orchard and its cidery): keep the best-scored one
+  out.sort((a, b) => b.score - a.score || a.miles - b.miles);
+  const kept = [];
+  for (const m of out) {
+    if (!kept.some((k) => haversineMiles([k.farm.lat, k.farm.lng], [m.farm.lat, m.farm.lng]) < 0.15)) kept.push(m);
+  }
+  return kept.slice(0, 20);
 }
 
 const sameName = (a, b) => {

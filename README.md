@@ -27,9 +27,15 @@ Static site, no build step, deployable on GitHub Pages.
 
 ## Deploy
 
-1. Repo → Settings → Pages → Deploy from branch → `main` / root.
-2. Add a DNS `CNAME` record: `farms` → `igorvaschuk.github.io`.
-3. Once the certificate is issued, tick "Enforce HTTPS".
+Firebase Hosting in the `vaschuk-com` GCP project (same as vaschuk.com), as a separate site `farms-vaschuk`.
+GitHub Actions deploys every push to `main`; pull requests get a preview URL.
+
+One-time setup:
+
+1. Create the site: `firebase hosting:sites:create farms-vaschuk --project vaschuk-com`
+   (or Firebase console → Hosting → Add another site).
+2. Add the repo secret `FIREBASE_SERVICE_ACCOUNT_VASCHUK_COM` — the same service-account JSON used by vaschuk-dot-com.
+3. Firebase console → Hosting → `farms-vaschuk` → Add custom domain → `farms.vaschuk.com`, then add the DNS records it shows.
 
 ## Local preview
 

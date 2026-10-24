@@ -1,7 +1,7 @@
 import { ACTIVITIES, PLACES, FARMS } from "./data.js";
 import { parseQuery } from "./parser.js";
-import { rank, rankOsm, describeDates, fmtMinutes } from "./engine.js";
-import { fetchOsmFarms } from "./osm.js";
+import { rank, rankPlaces, describeDates, fmtMinutes } from "./engine.js";
+import { importLibrary, geocodePlace, searchFarms, MAP_ID } from "./google.js";
 
 const $ = (s) => document.querySelector(s);
 const STORE = "farmday.profile.v1";
@@ -27,9 +27,9 @@ const DEFAULT = {
 
 let pendingPlace = null;
 let state = load();
-let map, layer, markers = {};
+let map, markers = {}, overlays = [], infoWindow, gm; // gm = loaded Google Maps classes
 let osmTimer, osmToken = 0, lastOsm = [];
-const OSM_THRESHOLD = 6; // fetch live farms when curated results are thinner than this
+const OSM_THRESHOLD = 6; // search Google for more farms when curated results are thinner than this
 
 /* ---------------- state ---------------- */
 function load() {
@@ -97,13 +97,11 @@ async function geocode(text) {
   if (PLACES[key]) { state.originName = title(key); state.origin = PLACES[key]; status.textContent = ""; status.className = "status"; return true; }
   status.textContent = "Looking up…"; status.className = "status";
   try {
-    const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=us&q=${encodeURIComponent(text)}`;
-    const res = await fetch(url, { headers: { "Accept-Language": "en" } });
-    const [hit] = await res.json();
+    const hit = await geocodePlace(text);
     if (!hit) throw new Error("not found");
-    state.origin = [+hit.lat, +hit.lon];
+    state.origin = [hit.lat, hit.lng];
     state.originName = text.replace(/\b\w/g, (c) => c.toUpperCase());
-    status.textContent = hit.display_name.split(",").slice(0, 3).join(",");
+    status.textContent = hit.label;
     return true;
   } catch {
     status.textContent = `Couldn't find "${text}" — try a neighborhood or ZIP.`; status.className = "status err";
@@ -163,7 +161,7 @@ function buildControls() {
   document.querySelectorAll(".view-toggle button").forEach((b) => b.onclick = () => {
     document.querySelectorAll(".view-toggle button").forEach((x) => x.setAttribute("aria-selected", x === b));
     $("#split").dataset.view = b.dataset.view;
-    if (b.dataset.view === "map" && map) setTimeout(() => { map.invalidateSize(); fitMap(); }, 50);
+    if (b.dataset.view === "map" && map) setTimeout(fitMap, 50);
   });
 }
 
@@ -198,7 +196,7 @@ function update() {
   if (wantOsm) loadOsm(dates, matches); else { osmToken++; $("#osm").hidden = true; }
 }
 
-// Live farms from OpenStreetMap, debounced so slider drags don't spam the API
+// More farms from Google Places, debounced so slider drags don't spam the API
 function loadOsm(dates, matches) {
   const token = ++osmToken;
   const sec = $("#osm");
@@ -207,20 +205,20 @@ function loadOsm(dates, matches) {
   clearTimeout(osmTimer);
   osmTimer = setTimeout(async () => {
     let found;
-    try { found = await fetchOsmFarms(state.origin, state.maxMiles / 1.25); }
+    try { found = await searchFarms(state.origin, state.maxMiles / 1.25, state.wants); }
     catch {
       if (token !== osmToken) return;
       sec.replaceChildren(el("p", { class: "loading-err" }, "Couldn't load more farms right now. Try again in a minute."));
       return;
     }
     if (token !== osmToken) return; // a newer search started meanwhile
-    const ranked = rankOsm(state, found, matches);
+    const ranked = rankPlaces(state, found, matches);
     lastOsm = ranked;
     renderSummary(dates, matches, ranked.length);
     if (!matches.length) $("#results").replaceChildren();
     renderOsm(ranked, matches.length);
     renderMap(matches);
-  }, 500);
+  }, 700);
 }
 
 function renderOsm(list, offset) {
@@ -234,7 +232,7 @@ function renderOsm(list, offset) {
   sec.replaceChildren(
     el("div", { class: "osm-head" },
       el("h3", {}, offset ? `More farms near ${state.originName}` : `Farms near ${state.originName}`),
-      el("p", {}, "From OpenStreetMap. We can't confirm seasons or activities for these yet, so check with the farm before you go.")),
+      el("p", {}, "Found on Google Maps. Hours and ratings come from Google; we can't confirm seasons or activities yet, so check with the farm before you go.")),
     el("ol", { class: "osm-list" }, ...list.map((m, i) => osmCard(m, offset + i + 1))));
 }
 
@@ -247,16 +245,17 @@ function osmCard(m, n) {
       el("div", { class: "rank" }, String(n)),
       el("div", {},
         el("h3", {}, f.name),
-        el("div", { class: "where" }, `${f.kind}${where ? ` · ${where}` : ""} · ${fmtMinutes(m.minutes)} · ~${m.miles} mi`)),
+        el("div", { class: "where" }, `${f.kind}${where ? ` · ${where}` : ""} · ${fmtMinutes(m.minutes)} · ~${m.miles} mi`),
+        f.rating ? el("div", { class: "rating", title: `${f.ratingCount} Google reviews` }, `★ ${f.rating.toFixed(1)}`, el("span", {}, ` (${f.ratingCount.toLocaleString()})`)) : null),
       el("div", { class: "score" }, el("b", {}, `${m.score}%`), el("span", {}, "match"))),
     el("div", { class: "notes" },
       m.why.length ? el("div", {}, el("h4", {}, "Why it might fit"), el("ul", { class: "why" }, ...m.why.map((t) => el("li", {}, t)))) : el("div"),
       el("div", {}, el("h4", {}, "Heads up"), el("ul", { class: "heads" }, ...m.heads.map((t) => el("li", {}, t))))),
     el("div", { class: "card-foot" },
-      el("span", { class: "hours" }, "Source: OpenStreetMap"),
+      f.hoursText ? el("details", { class: "hours" }, el("summary", {}, "Hours"), el("ul", {}, ...f.hoursText.map((t) => el("li", {}, t)))) : el("span", { class: "hours" }),
       f.website ? el("a", { href: f.website, target: "_blank", rel: "noopener nofollow" }, "Website") : null,
-      el("a", { href: `https://www.google.com/maps/dir/?api=1&origin=${state.origin.join(",")}&destination=${f.lat},${f.lng}`, target: "_blank", rel: "noopener" }, "Directions"),
-      el("a", { href: `https://www.google.com/search?q=${gq}+hours`, target: "_blank", rel: "noopener" }, "Check hours"),
+      el("a", { href: `https://www.google.com/maps/dir/?api=1&origin=${state.origin.join(",")}&destination=${encodeURIComponent(f.name)}&destination_place_id=${f.id.slice(2)}`, target: "_blank", rel: "noopener" }, "Directions"),
+      f.mapsUrl ? el("a", { href: f.mapsUrl, target: "_blank", rel: "noopener" }, "Google Maps") : el("a", { href: `https://www.google.com/search?q=${gq}+hours`, target: "_blank", rel: "noopener" }, "Check hours"),
       Object.assign(el("button", { type: "button" }, "On map"), { onclick: () => focus(f.id, true) })));
   li.addEventListener("mouseenter", () => highlight(f.id));
   return li;
@@ -343,55 +342,79 @@ function renderMisses(misses) {
 }
 
 /* ---------------- map ---------------- */
-function initMap() {
-  if (!window.L) { document.getElementById("map").innerHTML = '<p style="padding:20px">The map couldn\'t load — results still work.</p>'; return; }
-  map = L.map("map", { scrollWheelZoom: false, zoomControl: true }).setView(state.origin, 9);
-  // OpenStreetMap's standard tiles: no API key, attribution required.
-  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 19,
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-  }).addTo(map);
-  layer = L.layerGroup().addTo(map);
-  map.on("focus", () => map.scrollWheelZoom.enable());
-  map.on("blur", () => map.scrollWheelZoom.disable());
+async function initMap() {
+  try {
+    const [{ Map, Circle, InfoWindow, LatLngBounds }, { AdvancedMarkerElement }] =
+      await Promise.all([importLibrary("maps"), importLibrary("marker")]);
+    gm = { Circle, LatLngBounds, AdvancedMarkerElement };
+    map = new Map($("#map"), {
+      mapId: MAP_ID, center: toLL(state.origin), zoom: 9,
+      gestureHandling: "cooperative", streetViewControl: false, mapTypeControl: false, fullscreenControl: true,
+      clickableIcons: false,
+    });
+    infoWindow = new InfoWindow();
+    renderMap(lastMatches); // draw whatever results arrived while the API loaded
+  } catch (e) {
+    console.error(e);
+    $("#map").replaceChildren(el("p", { style: "padding:20px" }, "The map couldn't load — results still work."));
+  }
+}
+
+const toLL = ([lat, lng]) => ({ lat, lng });
+function pinEl(cls, id, label) {
+  const d = el("div", { class: cls, "data-id": id }, el("span", {}, String(label)));
+  return d;
 }
 
 let lastMatches = [];
 function renderMap(matches) {
   lastMatches = matches;
   if (!map) return;
-  layer.clearLayers(); markers = {};
-  const leaf = getComputedStyle(document.documentElement).getPropertyValue("--leaf").trim();
-  L.circle(state.origin, { radius: (state.maxMiles / 1.25) * 1609.34, color: leaf, weight: 1.5, dashArray: "6 6", fillOpacity: 0.05, interactive: false }).addTo(layer);
-  L.marker(state.origin, { icon: L.divIcon({ className: "", html: '<div class="home-pin"></div>', iconSize: [18, 18] }), title: state.originName, keyboard: false })
-    .bindTooltip(state.originName).addTo(layer);
-  matches.forEach((m, i) => {
+  overlays.forEach((o) => (o.setMap ? o.setMap(null) : (o.map = null)));
+  overlays = []; markers = {};
+  const leaf = getComputedStyle(document.documentElement).getPropertyValue("--leaf").trim() || "#2f6b3c";
+  overlays.push(new gm.Circle({
+    map, center: toLL(state.origin), radius: (state.maxMiles / 1.25) * 1609.34,
+    strokeColor: leaf, strokeOpacity: 0.8, strokeWeight: 1.5, fillColor: leaf, fillOpacity: 0.05, clickable: false,
+  }));
+  overlays.push(new gm.AdvancedMarkerElement({
+    map, position: toLL(state.origin), title: state.originName, content: el("div", { class: "home-pin" }), zIndex: 1,
+  }));
+  const add = (m, n, cls, html) => {
     const f = m.farm;
-    const mk = L.marker([f.lat, f.lng], {
-      icon: L.divIcon({ className: "", html: `<div class="pin" data-id="${f.id}"><span>${i + 1}</span></div>`, iconSize: [30, 30], iconAnchor: [15, 30], popupAnchor: [0, -28] }),
-      title: f.name, riseOnHover: true,
-    }).bindPopup(`<b>${i + 1}. ${f.name}</b><br>${f.town}, ${f.state} · ${fmtMinutes(m.minutes)}<br>${m.score}% match`);
-    mk.on("click", () => focus(f.id, false));
-    mk.addTo(layer); markers[f.id] = mk;
-  });
+    const mk = new gm.AdvancedMarkerElement({
+      map, position: { lat: f.lat, lng: f.lng }, title: `${n}. ${f.name}`, content: pinEl(cls, f.id, n), gmpClickable: true, zIndex: 100 - n,
+    });
+    mk.addListener("gmp-click", () => { openInfo(mk, html); focus(f.id, false); });
+    mk._html = html;
+    overlays.push(mk); markers[f.id] = mk;
+  };
+  matches.forEach((m, i) => add(m, i + 1, "pin",
+    `<b>${i + 1}. ${escapeHtml(m.farm.name)}</b><br>${escapeHtml(m.farm.town)}, ${escapeHtml(m.farm.state)} · ${fmtMinutes(m.minutes)}<br>${m.score}% match`));
   lastOsm.forEach((m, i) => {
     const f = m.farm, n = matches.length + i + 1;
     const where = [f.town, f.state].filter(Boolean).join(", ");
-    const mk = L.marker([f.lat, f.lng], {
-      icon: L.divIcon({ className: "", html: `<div class="pin osm" data-id="${f.id}"><span>${n}</span></div>`, iconSize: [30, 30], iconAnchor: [15, 30], popupAnchor: [0, -28] }),
-      title: f.name, riseOnHover: true,
-    }).bindPopup(`<b>${n}. ${escapeHtml(f.name)}</b><br>${escapeHtml(f.kind)}${where ? ` · ${escapeHtml(where)}` : ""} · ${fmtMinutes(m.minutes)}<br><small>From OpenStreetMap</small>`);
-    mk.on("click", () => focus(f.id, false));
-    mk.addTo(layer); markers[f.id] = mk;
+    add(m, n, "pin osm",
+      `<b>${n}. ${escapeHtml(f.name)}</b><br>${escapeHtml(f.kind)}${where ? ` · ${escapeHtml(where)}` : ""} · ${fmtMinutes(m.minutes)}${f.rating ? `<br>★ ${f.rating.toFixed(1)} (${f.ratingCount})` : ""}`);
   });
   fitMap();
 }
-function escapeHtml(s) { return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]); }
+function openInfo(mk, html) {
+  const box = document.createElement("div");
+  box.className = "info";
+  box.innerHTML = html; // built only from escaped values above
+  infoWindow.setContent(box);
+  infoWindow.open({ map, anchor: mk });
+}
+function escapeHtml(s) { return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]); }
 function fitMap() {
   if (!map) return;
   const pts = [state.origin, ...lastMatches.map((m) => [m.farm.lat, m.farm.lng]), ...lastOsm.map((m) => [m.farm.lat, m.farm.lng])];
-  if (pts.length > 1) map.fitBounds(pts, { padding: [40, 40], maxZoom: 11 });
-  else map.setView(state.origin, 9);
+  if (pts.length < 2) { map.setCenter(toLL(state.origin)); map.setZoom(9); return; }
+  const b = new gm.LatLngBounds();
+  pts.forEach((p) => b.extend(toLL(p)));
+  map.fitBounds(b, 40);
+  google.maps.event.addListenerOnce(map, "idle", () => { if (map.getZoom() > 11) map.setZoom(11); });
 }
 function highlight(id) {
   document.querySelectorAll(".pin").forEach((p) => p.classList.toggle("active", p.dataset.id === id));
@@ -402,7 +425,7 @@ function focus(id, fromCard) {
   const mk = markers[id];
   if (fromCard) {
     if (getComputedStyle(document.querySelector(".view-toggle")).display !== "none") document.querySelector('.view-toggle [data-view="map"]').click();
-    if (mk && map) { map.setView(mk.getLatLng(), Math.max(map.getZoom(), 11)); mk.openPopup(); }
+    if (mk && map) { map.panTo(mk.position); if (map.getZoom() < 11) map.setZoom(11); openInfo(mk, mk._html); }
   } else {
     document.getElementById(`farm-${id}`)?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }

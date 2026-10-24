@@ -15,11 +15,12 @@ Static site, no build step, deployable on GitHub Pages.
 | `js/parser.js` | Free text → intent (origin, distance/time, dates, activities, party, preferences) |
 | `js/engine.js` | Hard filters, near-miss reasons, scoring, explanations |
 | `js/data.js` | Curated farm records (NYC + Greater Boston) + known starting points |
-| `js/osm.js` | Loads nationwide OpenStreetMap farm tiles (`data/osm/`) when curated results are thin |
-| `scripts/build_osm_tiles.py` | Builds those tiles; run monthly by `refresh-farm-data.yml` from Geofabrik US extracts |
-| `js/app.js` | UI, map (Leaflet + OpenStreetMap tiles), URL/localStorage state |
+| `js/google.js` | Google Maps Platform: map loader, Places text search, geocoding |
+| `js/app.js` | UI, Google map, URL/localStorage state |
 
-- Unknown starting points are geocoded with OpenStreetMap Nominatim; "use my location" uses the browser.
+- Unknown starting points are geocoded with Google; "use my location" uses the browser.
+- When curated matches are thin (< 6), the site runs up to 3 Google Places text searches ("pick your own farm" plus one per must-have activity) and ranks results by distance, likely activities, Google rating and whether Google lists them open on your dates.
+- Google key: browser key "farms.vaschuk.com browser key" in project `vaschuk-com`, restricted to this site's domains and to the Maps JavaScript, Places and Geocoding APIs. Map ID `fa68174fab48eb7b24eec4a1`.
 - Distances are straight-line × 1.25 as a road estimate; drive time assumes ~38 mph + 12 min.
 - State lives in the URL, so any search is shareable. `?q=...` also works.
 

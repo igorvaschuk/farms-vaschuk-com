@@ -162,13 +162,11 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .pin span { transform: rotate(45deg); color: #fff; font: 700 13px var(--body); }
 .pin.active { background: var(--leaf); }
 .home-pin { width: 18px; height: 18px; border-radius: 50%; background: var(--leaf); border: 3px solid #fff; box-shadow: 0 0 0 3px var(--leaf); }
-.leaflet-popup-content { font: 14px/1.4 var(--body); }
-.leaflet-popup-content b { font-family: var(--display); font-size: 15px; }
 
 .foot { margin-top: 48px; padding-block: 24px 40px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13.5px; }
 .foot p { margin: 0 0 8px; max-width: 80ch; }
 
-/* live OpenStreetMap results */
+/* extra results from Google Places */
 .list-col { min-width: 0; }
 .osm { margin-top: 26px; }
 .osm-head h3 { font: 600 20px var(--display); margin: 0 0 4px; }
@@ -186,3 +184,13 @@ button, input, select, textarea { font: inherit; color: inherit; }
 @media (prefers-reduced-motion: reduce) { .loading::before { animation: none; } }
 .pin.osm { background: var(--muted); }
 .pin.osm.active { background: var(--leaf); }
+
+/* Google Maps */
+.info { font: 14px/1.45 var(--body); color: #1e2a1f; }
+.info b { font-family: var(--display); font-size: 15px; }
+.pin { cursor: pointer; transform-origin: 50% 50%; }
+.rating { font-size: 13.5px; color: var(--gold); font-weight: 600; margin-top: 2px; }
+.rating span { color: var(--muted); font-weight: 400; }
+details.hours { margin-right: auto; color: var(--muted); }
+details.hours summary { cursor: pointer; }
+details.hours ul { margin: 6px 0 0; padding-left: 18px; font-size: 13px; }

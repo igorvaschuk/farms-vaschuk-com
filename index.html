@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Farm Day — pick-your-own farms near NYC, matched to you</title>
+  <meta name="description" content="Tell us what kind of farm day you want — who's coming, how far you'll drive, what you want to pick — and get farms ranked for you, open on your dates.">
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <header class="top">
+    <a class="brand" href="./">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="18" r="11" fill="var(--apple)"/><path d="M16 7c0-3 2-5 5-5" stroke="var(--leaf)" stroke-width="2.5" fill="none" stroke-linecap="round"/><path d="M16 8c3-3 8-2 9 0-3 3-7 3-9 0z" fill="var(--leaf)"/></svg>
+      <span>Farm Day</span>
+    </a>
+    <span class="tag">Pick-your-own farms near NYC, ranked for <em>you</em></span>
+  </header>
+
+  <section class="hero">
+    <h1>What does your perfect farm day look like?</h1>
+    <form id="ask" class="ask" autocomplete="off">
+      <label for="q" class="sr">Describe your farm day</label>
+      <textarea id="q" rows="2" placeholder="e.g. Family from Park Slope, fruit picking with a toddler, under an hour away, this weekend"></textarea>
+      <button type="submit" class="go">Find my farms</button>
+    </form>
+    <div class="examples" id="examples"></div>
+  </section>
+
+  <section class="intent" aria-label="Your preferences">
+    <div class="intent-head">
+      <h2>Here's what I understood</h2>
+      <span class="hint">Adjust anything — results update instantly and are remembered on this device.</span>
+    </div>
+
+    <div class="controls">
+      <div class="ctl ctl-from">
+        <label for="from">Starting from</label>
+        <div class="row">
+          <input id="from" type="text" placeholder="Neighborhood or town" list="placelist">
+          <datalist id="placelist"></datalist>
+          <button type="button" id="locate" class="icon-btn" title="Use my location" aria-label="Use my location">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="7.5" fill="none"/></svg>
+          </button>
+        </div>
+        <small id="fromStatus" class="status"></small>
+      </div>
+
+      <div class="ctl">
+        <label for="miles">Max drive <output id="milesOut"></output></label>
+        <input id="miles" type="range" min="10" max="150" step="5">
+      </div>
+
+      <div class="ctl">
+        <label for="when">When</label>
+        <select id="when">
+          <option value="weekend">This weekend</option>
+          <option value="today">Today</option>
+          <option value="tomorrow">Tomorrow</option>
+          <option value="saturday">Saturday</option>
+          <option value="sunday">Sunday</option>
+          <option value="any">Next two weeks</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="group">
+      <div class="group-label">What you want to do <span class="legend"><b class="k must">✓</b> must-have · <b class="k nice">♡</b> nice-to-have · tap to cycle</span></div>
+      <div class="chips" id="activityChips"></div>
+    </div>
+
+    <div class="group two">
+      <div>
+        <div class="group-label">Who's coming</div>
+        <div class="chips" id="partyChips"></div>
+      </div>
+      <div>
+        <div class="group-label">You'd prefer</div>
+        <div class="chips" id="prefChips"></div>
+      </div>
+    </div>
+  </section>
+
+  <main class="results-wrap">
+    <div class="summary" id="summary" aria-live="polite"></div>
+    <div class="view-toggle" role="tablist">
+      <button role="tab" data-view="list" aria-selected="true">List</button>
+      <button role="tab" data-view="map" aria-selected="false">Map</button>
+    </div>
+    <div class="split" id="split" data-view="list">
+      <ol class="results" id="results"></ol>
+      <div class="map-col"><div id="map" role="region" aria-label="Map of matching farms"></div></div>
+    </div>
+    <section class="misses" id="misses" hidden></section>
+  </main>
+
+  <footer class="foot">
+    <p><strong>Always confirm before you go.</strong> Hours, picking conditions and ticket rules change week to week, and listings here haven't all been verified with each farm yet. Drive times are estimates without traffic.</p>
+    <p>Map © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, © <a href="https://carto.com/attributions">CARTO</a> · farms.vaschuk.com</p>
+  </footer>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

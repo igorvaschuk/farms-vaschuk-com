@@ -270,9 +270,10 @@ function renderMisses(misses) {
 function initMap() {
   if (!window.L) { document.getElementById("map").innerHTML = '<p style="padding:20px">The map couldn\'t load — results still work.</p>'; return; }
   map = L.map("map", { scrollWheelZoom: false, zoomControl: true }).setView(state.origin, 9);
-  L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", {
-    maxZoom: 18, subdomains: "abcd",
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
+  // OpenStreetMap's standard tiles: no API key, attribution required.
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
   }).addTo(map);
   layer = L.layerGroup().addTo(map);
   map.on("focus", () => map.scrollWheelZoom.enable());

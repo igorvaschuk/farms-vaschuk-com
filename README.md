@@ -15,7 +15,8 @@ Static site, no build step, deployable on GitHub Pages.
 | `js/parser.js` | Free text → intent (origin, distance/time, dates, activities, party, preferences) |
 | `js/engine.js` | Hard filters, near-miss reasons, scoring, explanations |
 | `js/data.js` | Curated farm records (NYC + Greater Boston) + known starting points |
-| `js/osm.js` | Live farms from OpenStreetMap (Overpass API) when curated results are thin |
+| `js/osm.js` | Loads nationwide OpenStreetMap farm tiles (`data/osm/`) when curated results are thin |
+| `scripts/build_osm_tiles.py` | Builds those tiles; run monthly by `refresh-farm-data.yml` from Geofabrik US extracts |
 | `js/app.js` | UI, map (Leaflet + OpenStreetMap tiles), URL/localStorage state |
 
 - Unknown starting points are geocoded with OpenStreetMap Nominatim; "use my location" uses the browser.

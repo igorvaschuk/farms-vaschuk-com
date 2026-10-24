@@ -210,7 +210,7 @@ function loadOsm(dates, matches) {
     try { found = await fetchOsmFarms(state.origin, state.maxMiles / 1.25); }
     catch {
       if (token !== osmToken) return;
-      sec.replaceChildren(el("p", { class: "loading-err" }, "Couldn't reach OpenStreetMap for more farms right now. Try again in a minute."));
+      sec.replaceChildren(el("p", { class: "loading-err" }, "Couldn't load more farms right now. Try again in a minute."));
       return;
     }
     if (token !== osmToken) return; // a newer search started meanwhile
@@ -234,7 +234,7 @@ function renderOsm(list, offset) {
   sec.replaceChildren(
     el("div", { class: "osm-head" },
       el("h3", {}, offset ? `More farms near ${state.originName}` : `Farms near ${state.originName}`),
-      el("p", {}, "Live from OpenStreetMap. We can't confirm seasons or activities for these yet, so check with the farm before you go.")),
+      el("p", {}, "From OpenStreetMap. We can't confirm seasons or activities for these yet, so check with the farm before you go.")),
     el("ol", { class: "osm-list" }, ...list.map((m, i) => osmCard(m, offset + i + 1))));
 }
 

@@ -1,35 +1,49 @@
 name: Deploy to Firebase Hosting
 
+# Keyless auth: GitHub's OIDC token is exchanged for short-lived Google
+# credentials via Workload Identity Federation (pool "github", provider
+# "farms-repo" in project vaschuk-com, restricted to this repository).
+# No service-account keys or repo secrets are needed.
+
 on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
-  checks: write
-  pull-requests: write
+  id-token: write
+
+env:
+  PROJECT_ID: vaschuk-com
+  WIF_PROVIDER: projects/1059072294008/locations/global/workloadIdentityPools/github/providers/farms-repo
+  SERVICE_ACCOUNT: farms-deployer@vaschuk-com.iam.gserviceaccount.com
 
 jobs:
-  preview:
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+  deploy:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: FirebaseExtended/action-hosting-deploy@v0
-        with:
-          repoToken: ${{ secrets.GITHUB_TOKEN }}
-          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_VASCHUK_COM }}
-          projectId: vaschuk-com
 
-  live:
-    if: github.event_name == 'push'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: FirebaseExtended/action-hosting-deploy@v0
+      - uses: google-github-actions/auth@v2
         with:
-          repoToken: ${{ secrets.GITHUB_TOKEN }}
-          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_VASCHUK_COM }}
-          projectId: vaschuk-com
-          channelId: live
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.SERVICE_ACCOUNT }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Deploy live site
+        if: github.event_name != 'pull_request'
+        run: npx -y firebase-tools@latest deploy --only hosting --project "$PROJECT_ID" --non-interactive
+
+      - name: Deploy PR preview channel
+        if: github.event_name == 'pull_request'
+        run: |
+          npx -y firebase-tools@latest hosting:channel:deploy "pr-${{ github.event.number }}" \
+            --expires 7d --project "$PROJECT_ID" --non-interactive --json > channel.json
+          url=$(node -e 'const j=require("./channel.json");const r=j.result||{};console.log(Object.values(r)[0]?.url||"")')
+          echo "Preview: $url" | tee -a "$GITHUB_STEP_SUMMARY"
